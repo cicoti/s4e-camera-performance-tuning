@@ -16,7 +16,7 @@ import java.util.List;
 
 import com.s4etech.performance.v2.model.CameraConfig;
 import com.s4etech.performance.v2.model.PipelineTestConfig;
-import com.s4etech.performance.v2.model.PipelineTestMetrics;
+import com.s4etech.performance.v2.model.PipelineTestSummary;
 import com.s4etech.performance.v2.tuning.RecommendationSelector;
 
 public class TuningReportService {
@@ -29,11 +29,11 @@ public class TuningReportService {
 
     public void printConsoleReport(
             CameraConfig camera,
-            List<PipelineTestMetrics> results,
-            PipelineTestMetrics recommendation,
+            List<PipelineTestSummary> summaries,
+            PipelineTestSummary recommendation,
             RecommendationSelector selector) {
 
-        List<PipelineTestMetrics> ranked = selector.rankBestFirst(results);
+        List<PipelineTestSummary> ranked = selector.rankBestFirst(summaries);
 
         System.out.println();
         System.out.println("====================================================");
@@ -68,8 +68,8 @@ public class TuningReportService {
 
     public Path writeCsvReport(
             CameraConfig camera,
-            List<PipelineTestMetrics> results,
-            PipelineTestMetrics recommendation,
+            List<PipelineTestSummary> summaries,
+            PipelineTestSummary recommendation,
             RecommendationSelector selector) {
 
         Path file = getReportFile(camera);
@@ -83,7 +83,7 @@ public class TuningReportService {
                     StandardOpenOption.TRUNCATE_EXISTING
             };
 
-            List<PipelineTestMetrics> ranked = selector.rankBestFirst(results);
+            List<PipelineTestSummary> ranked = selector.rankBestFirst(summaries);
 
             try (BufferedWriter writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8, options)) {
                 writer.write(getCsvHeader());
@@ -91,8 +91,8 @@ public class TuningReportService {
 
                 int rank = 1;
 
-                for (PipelineTestMetrics metrics : ranked) {
-                    writer.write(toCsvLine(camera, metrics, recommendation, selector, rank));
+                for (PipelineTestSummary summary : ranked) {
+                    writer.write(toCsvLine(camera, summary, recommendation, selector, rank));
                     writer.newLine();
                     rank++;
                 }
@@ -108,7 +108,7 @@ public class TuningReportService {
     }
 
     private void printRanking(
-            List<PipelineTestMetrics> ranked,
+            List<PipelineTestSummary> ranked,
             RecommendationSelector selector,
             int limit) {
 
@@ -120,42 +120,44 @@ public class TuningReportService {
         int count = Math.min(limit, ranked.size());
 
         for (int index = 0; index < count; index++) {
-            PipelineTestMetrics metrics = ranked.get(index);
-            PipelineTestConfig config = metrics.getConfig();
+            PipelineTestSummary summary = ranked.get(index);
+            PipelineTestConfig config = summary.getConfig();
 
             System.out.println((index + 1) + ". "
                     + config.getProtocol()
                     + " | " + config.getAccelerationDescription()
                     + " | latency=" + config.getLatencyMs()
                     + " | buffer=" + config.getBufferMs()
-                    + " | score=" + format(metrics.getScore())
-                    + " | maiorIntervaloMs=" + metrics.getMaximumIntervalMs()
-                    + " | picos120=" + metrics.getPeaksAbove120Ms()
-                    + " | picos200=" + metrics.getPeaksAbove200Ms()
-                    + " | status=" + (selector.isRecommended(metrics) ? "RECOMENDADA" : "RESSALVA"));
+                    + " | scoreMedio=" + format(summary.getAverageScore())
+                    + " | scoreMinimo=" + format(summary.getMinimumScore())
+                    + " | piorMaiorIntervaloMs=" + summary.getWorstMaximumIntervalMs()
+                    + " | picos120=" + summary.getTotalPeaksAbove120Ms()
+                    + " | picos200=" + summary.getTotalPeaksAbove200Ms()
+                    + " | repeticoes=" + summary.getExecutionCount()
+                    + " | status=" + (selector.isRecommended(summary) ? "RECOMENDADA" : "RESSALVA"));
         }
     }
 
-    private List<PipelineTestMetrics> getWorstResults(List<PipelineTestMetrics> ranked) {
-        List<PipelineTestMetrics> worst = new ArrayList<>(ranked);
+    private List<PipelineTestSummary> getWorstResults(List<PipelineTestSummary> ranked) {
+        List<PipelineTestSummary> worst = new ArrayList<>(ranked);
         Collections.reverse(worst);
         return worst;
     }
 
     private String buildRecommendationReason(
-            PipelineTestMetrics recommendation,
+            PipelineTestSummary recommendation,
             RecommendationSelector selector) {
-
-        PipelineTestConfig config = recommendation.getConfig();
 
         if (!selector.isRecommended(recommendation)) {
             return "melhor candidata disponivel, mas ficou abaixo de algum criterio minimo objetivo.";
         }
 
-        return "sem erros/watchdog, sem picos acima de 200 ms, score "
-                + format(recommendation.getScore())
-                + ", maior intervalo "
-                + recommendation.getMaximumIntervalMs()
+        return "sem erros/watchdog, sem picos acima de 200 ms, score medio "
+                + format(recommendation.getAverageScore())
+                + ", score minimo "
+                + format(recommendation.getMinimumScore())
+                + ", pior maior intervalo "
+                + recommendation.getWorstMaximumIntervalMs()
                 + " ms, priorizando estabilidade e menor latencia/buffer em empate tecnico.";
     }
 
@@ -172,24 +174,24 @@ public class TuningReportService {
 
     private String getCsvHeader() {
         return "dataHora;rank;recomendacaoFinal;camera;url;protocolo;codec;aceleracao;decoder;"
-                + "latencyMs;bufferMs;watchdogTimeoutMs;outputWidth;outputHeight;durationSeconds;"
-                + "status;fpsMedio;fpsMinimo;fpsMaximo;intervaloMedioMs;maiorIntervaloMs;"
-                + "picos80;picos120;picos200;erros;watchdog;tempoAtePrimeiroFrameMs;score;"
-                + "statusRecomendacao;mensagemErro";
+                + "latencyMs;bufferMs;watchdogTimeoutMs;outputWidth;outputHeight;durationSeconds;repeticoes;"
+                + "status;fpsMedio;fpsMinimo;fpsMaximo;intervaloMedioMs;piorMaiorIntervaloMs;"
+                + "picos80Total;picos120Total;picos200Total;errosTotal;watchdogTotal;"
+                + "tempoMedioAtePrimeiroFrameMs;scoreMedio;scoreMinimo;statusRecomendacao;mensagemErro";
     }
 
     private String toCsvLine(
             CameraConfig camera,
-            PipelineTestMetrics metrics,
-            PipelineTestMetrics recommendation,
+            PipelineTestSummary summary,
+            PipelineTestSummary recommendation,
             RecommendationSelector selector,
             int rank) {
 
-        PipelineTestConfig config = metrics.getConfig();
+        PipelineTestConfig config = summary.getConfig();
 
         return csv(LocalDateTime.now().format(REPORT_TIMESTAMP_FORMATTER)) + ";"
                 + rank + ";"
-                + (metrics == recommendation) + ";"
+                + (summary == recommendation) + ";"
                 + csv(camera.getCode()) + ";"
                 + csv(camera.getMaskedRtspUrl()) + ";"
                 + csv(String.valueOf(config.getProtocol())) + ";"
@@ -202,21 +204,23 @@ public class TuningReportService {
                 + config.getOutputWidth() + ";"
                 + config.getOutputHeight() + ";"
                 + config.getTestDurationSeconds() + ";"
-                + csv(metrics.getStatus()) + ";"
-                + format(metrics.getAverageFps()) + ";"
-                + metrics.getMinimumFps() + ";"
-                + metrics.getMaximumFps() + ";"
-                + format(metrics.getAverageIntervalMs()) + ";"
-                + metrics.getMaximumIntervalMs() + ";"
-                + metrics.getPeaksAbove80Ms() + ";"
-                + metrics.getPeaksAbove120Ms() + ";"
-                + metrics.getPeaksAbove200Ms() + ";"
-                + metrics.getErrorCount() + ";"
-                + metrics.getWatchdogCount() + ";"
-                + metrics.getTimeToFirstFrameMs() + ";"
-                + format(metrics.getScore()) + ";"
-                + csv(selector.isRecommended(metrics) ? "RECOMENDADA" : "RESSALVA") + ";"
-                + csv(metrics.getErrorMessage());
+                + summary.getExecutionCount() + ";"
+                + csv(summary.getStatus()) + ";"
+                + format(summary.getAverageFps()) + ";"
+                + summary.getMinimumFps() + ";"
+                + summary.getMaximumFps() + ";"
+                + format(summary.getAverageIntervalMs()) + ";"
+                + summary.getWorstMaximumIntervalMs() + ";"
+                + summary.getTotalPeaksAbove80Ms() + ";"
+                + summary.getTotalPeaksAbove120Ms() + ";"
+                + summary.getTotalPeaksAbove200Ms() + ";"
+                + summary.getTotalErrors() + ";"
+                + summary.getTotalWatchdog() + ";"
+                + format(summary.getAverageTimeToFirstFrameMs()) + ";"
+                + format(summary.getAverageScore()) + ";"
+                + format(summary.getMinimumScore()) + ";"
+                + csv(selector.isRecommended(summary) ? "RECOMENDADA" : "RESSALVA") + ";"
+                + csv(summary.getErrorMessage());
     }
 
     private String cleanFileName(String value) {

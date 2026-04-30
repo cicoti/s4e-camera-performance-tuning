@@ -10,11 +10,32 @@ POC Java/Maven para descoberta e tuning de performance de cameras RTSP com GStre
 
 ## Como executar
 
-Configure a camera de teste por variavel de ambiente:
+Configure a camera de teste em um arquivo externo:
+
+```text
+C:\caminho\para\tunning.properties
+```
+
+Esse arquivo nao deve ficar dentro do projeto.
+
+Exemplo:
+
+```properties
+tuning.repetitions=3
+
+camera.1.code=CAM01_INTELBRAS
+camera.1.rtspUrl=rtsp://usuario:senha@192.168.15.21:554/cam/realmonitor?channel=1&subtype=0
+
+camera.2.code=CAM02_INTELBRAS
+camera.2.rtspUrl=rtsp://usuario:senha@192.168.15.22:554/cam/realmonitor?channel=1&subtype=0
+```
+
+Tambem e possivel sobrescrever por variavel de ambiente:
 
 ```powershell
 $env:S4E_TEST_CAMERA_CODE = "CAM01_INTELBRAS"
 $env:S4E_TEST_RTSP_URL = "rtsp://usuario:senha@host:554/cam/realmonitor?channel=1&subtype=0"
+$env:S4E_TUNING_REPETITIONS = "3"
 ```
 
 Ou por propriedades Java:
@@ -23,12 +44,37 @@ Ou por propriedades Java:
 mvn exec:java -Dexec.mainClass=com.s4etech.performance.v2.AppPerformanceTuningV2 -Ds4e.test.cameraCode=CAM01_INTELBRAS -Ds4e.test.rtspUrl="rtsp://usuario:senha@host:554/cam/realmonitor?channel=1&subtype=0"
 ```
 
+O numero de repeticoes por configuracao tambem pode ser informado com:
+
+```powershell
+-Ds4e.tuning.repetitions=3
+```
+
+Informe o caminho do arquivo:
+
+```powershell
+$env:S4E_CAMERA_CONFIG_FILE = "C:\caminho\para\tunning.properties"
+```
+
+ou:
+
+```powershell
+-Ds4e.camera.configFile=C:\caminho\para\tunning.properties
+```
+
 ## Fluxo atual
 
 1. Descobre codec e disponibilidade TCP/UDP.
 2. Gera candidatos de tuning combinando protocolo, decoder, latency e buffer.
-3. Executa benchmark tecnico com `fakesink`.
-4. Escolhe recomendacao por regra deterministica priorizando estabilidade.
-5. Gera relatorio CSV em `logs/`.
+3. Executa benchmark tecnico com `fakesink`, com repeticoes por configuracao.
+4. Consolida score medio, score minimo, pior intervalo, picos, erros e watchdog.
+5. Escolhe recomendacao por regra deterministica priorizando estabilidade.
+6. Gera relatorio CSV em `logs/`.
 
 O preview visual existe no codigo, mas esta desabilitado no fluxo principal.
+
+## Escopo do stream
+
+A aplicacao testa somente a URL RTSP informada. Ela nao gera variações de URL e nao testa
+automaticamente `subtype=1`, `subtype=2` ou streams secundarios. Para cameras Intelbras/Dahua,
+o tuning deve ser executado sobre o stream principal/mainstream, normalmente `subtype=0`.
