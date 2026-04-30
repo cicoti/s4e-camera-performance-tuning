@@ -10,10 +10,15 @@ public class RecommendationSelector {
 
     private static final double MINIMUM_RECOMMENDED_AVERAGE_SCORE = 90.0;
     private static final double MINIMUM_RECOMMENDED_MINIMUM_SCORE = 85.0;
+    private static final int MAXIMUM_RECOMMENDED_PEAKS_ABOVE_120_MS = 0;
     private static final int MAXIMUM_RECOMMENDED_PEAKS_ABOVE_200_MS = 0;
     private static final int MAXIMUM_RECOMMENDED_ERRORS = 0;
     private static final int MAXIMUM_RECOMMENDED_WATCHDOG = 0;
     private static final long MAXIMUM_INTERVAL_CLOSE_RESULT_TOLERANCE_MS = 15;
+
+    public static final String STATUS_RECOMMENDED = "RECOMENDADA";
+    public static final String STATUS_WARNING = "RESSALVA";
+    public static final String STATUS_REJECTED = "REPROVADA";
 
     public PipelineTestSummary selectBest(List<PipelineTestSummary> results) {
         if (results == null || results.isEmpty()) {
@@ -55,31 +60,45 @@ public class RecommendationSelector {
     }
 
     public boolean isRecommended(PipelineTestSummary summary) {
+        return STATUS_RECOMMENDED.equals(getRecommendationStatus(summary));
+    }
+
+    public String getRecommendationStatus(PipelineTestSummary summary) {
         if (summary == null) {
-            return false;
+            return STATUS_REJECTED;
         }
 
         if (summary.getAverageScore() < MINIMUM_RECOMMENDED_AVERAGE_SCORE) {
-            return false;
+            return STATUS_REJECTED;
         }
 
         if (summary.getMinimumScore() < MINIMUM_RECOMMENDED_MINIMUM_SCORE) {
-            return false;
+            return STATUS_REJECTED;
+        }
+
+        if (summary.getTotalPeaksAbove120Ms() > MAXIMUM_RECOMMENDED_PEAKS_ABOVE_120_MS) {
+            if (summary.getTotalPeaksAbove200Ms() > MAXIMUM_RECOMMENDED_PEAKS_ABOVE_200_MS
+                    || summary.getTotalErrors() > MAXIMUM_RECOMMENDED_ERRORS
+                    || summary.getTotalWatchdog() > MAXIMUM_RECOMMENDED_WATCHDOG) {
+                return STATUS_REJECTED;
+            }
+
+            return STATUS_WARNING;
         }
 
         if (summary.getTotalPeaksAbove200Ms() > MAXIMUM_RECOMMENDED_PEAKS_ABOVE_200_MS) {
-            return false;
+            return STATUS_REJECTED;
         }
 
         if (summary.getTotalErrors() > MAXIMUM_RECOMMENDED_ERRORS) {
-            return false;
+            return STATUS_REJECTED;
         }
 
         if (summary.getTotalWatchdog() > MAXIMUM_RECOMMENDED_WATCHDOG) {
-            return false;
+            return STATUS_REJECTED;
         }
 
-        return true;
+        return STATUS_RECOMMENDED;
     }
 
     private List<PipelineTestSummary> filterRecommended(List<PipelineTestSummary> results) {

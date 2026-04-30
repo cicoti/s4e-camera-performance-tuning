@@ -10,13 +10,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 
+import com.s4etech.performance.v2.AppPaths;
 import com.s4etech.performance.v2.model.CameraConfig;
 import com.s4etech.performance.v2.model.PipelineTestConfig;
 import com.s4etech.performance.v2.model.PipelineTestSummary;
@@ -159,7 +159,9 @@ public class LocalLlmAnalysisService {
         prompt.append('\n');
 
         prompt.append("Criterios objetivos do algoritmo:\n");
-        prompt.append("- recomendada se scoreMedio >= 90, scoreMinimo >= 85, picos200 == 0, erros == 0, watchdog == 0.\n");
+        prompt.append("- RECOMENDADA se scoreMedio >= 90, scoreMinimo >= 85, picos120 == 0, picos200 == 0, erros == 0, watchdog == 0.\n");
+        prompt.append("- RESSALVA se tem picos120, mas nao tem picos200, erro, watchdog ou score abaixo do minimo.\n");
+        prompt.append("- REPROVADA se tem picos200, erro, watchdog, scoreMedio < 90 ou scoreMinimo < 85.\n");
         prompt.append("- estabilidade vem antes de score medio.\n");
         prompt.append("- em empate tecnico, preferir menor latency e menor buffer.\n\n");
 
@@ -228,7 +230,7 @@ public class LocalLlmAnalysisService {
                 .append(" | scoreMinimo=")
                 .append(format(summary.getMinimumScore()))
                 .append(" | status=")
-                .append(selector.isRecommended(summary) ? "RECOMENDADA" : "RESSALVA")
+                .append(selector.getRecommendationStatus(summary))
                 .append('\n');
     }
 
@@ -414,9 +416,8 @@ public class LocalLlmAnalysisService {
         String timestamp = LocalDateTime.now().format(FILE_TIMESTAMP_FORMATTER);
         String cameraCode = cleanFileName(camera != null ? camera.getCode() : "camera");
 
-        return Paths.get(
-                System.getProperty("user.dir"),
-                "logs",
+        return AppPaths.getLogFile(
+                cameraCode,
                 "llm-analysis-" + cameraCode + "-" + timestamp + ".md"
         );
     }

@@ -1,14 +1,24 @@
 package com.s4etech.performance.v2;
 
+import java.awt.AWTException;
+import java.awt.Image;
+import java.awt.MenuItem;
+import java.awt.PopupMenu;
+import java.awt.SystemTray;
+import java.awt.TrayIcon;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+
+import javax.imageio.ImageIO;
+import javax.swing.ImageIcon;
 
 import com.s4etech.performance.v2.benchmark.GStreamerBenchmarkRunner;
 import com.s4etech.performance.v2.discovery.RtspStreamDiscoveryService;
@@ -28,11 +38,15 @@ import org.freedesktop.gstreamer.Gst;
 public class AppPerformanceTuningV2 {
 
     private static final Path DEFAULT_LOCAL_CONFIG_FILE = Paths.get("config", "tunning.properties");
+    private static final String TRAY_ICON_RESOURCE = "/icons/app-icon.png";
+    private static TrayIcon trayIcon;
 
     public static void main(String[] args) {
         Gst.init("AppPerformanceTuningV2", args);
+        installTrayIcon();
 
         try {
+            System.out.println("Diretorio da aplicacao: " + AppPaths.getAppDir());
             Properties localConfig = loadLocalConfig();
             List<CameraConfig> cameras = createTestCameras(localConfig);
 
@@ -89,18 +103,156 @@ public class AppPerformanceTuningV2 {
                 System.out.println();
                 System.out.println("Relatorio CSV: " + reportFile.toAbsolutePath());
 
-                runLocalLlmAnalysis(
+                Optional<String> llmAnalysis = runLocalLlmAnalysis(
                         llmAnalysisService,
                         camera,
                         completeResults,
                         bestFinalResult,
                         recommendationSelector
                 );
+
+                Path recommendationReportFile = reportService.writeRecommendationTextReport(
+                        camera,
+                        completeResults,
+                        bestFinalResult,
+                        recommendationSelector,
+                        llmAnalysis
+                );
+
+                System.out.println();
+                System.out.println("Relatorio TXT recomendacao: " + recommendationReportFile.toAbsolutePath());
             }
 
         } finally {
+            removeTrayIcon();
             Gst.deinit();
+            System.out.println("Aplicacao encerrada.");
         }
+    }
+
+    private static void installTrayIcon() {
+        if (!SystemTray.isSupported()) {
+            System.out.println("Bandeja do sistema nao suportada neste ambiente.");
+            return;
+        }
+
+        try (InputStream iconStream = AppPerformanceTuningV2.class.getResourceAsStream(TRAY_ICON_RESOURCE)) {
+            if (iconStream == null) {
+                Image externalImage = loadExternalTrayIcon();
+
+                if (externalImage == null) {
+                    System.out.println("Icone da bandeja nao encontrado: " + TRAY_ICON_RESOURCE);
+                    System.out.println("Tambem procurei em: "
+                            + AppPaths.getAppDir().resolve("app-icon.png") + ", "
+                            + AppPaths.getAppDir().resolve("app-icon.ico") + ", "
+                            + AppPaths.getAppDir().resolve("icons").resolve("app-icon.png") + ", "
+                            + AppPaths.getAppDir().resolve("icons").resolve("app-icon.ico"));
+                    return;
+                }
+
+                addTrayIcon(externalImage);
+                return;
+            }
+
+            Image image = ImageIO.read(iconStream);
+            addTrayIcon(image);
+        } catch (AWTException | IOException | RuntimeException e) {
+            System.out.println("Nao foi possivel adicionar icone na bandeja: " + e.getMessage());
+        }
+    }
+
+    private static Image loadExternalTrayIcon() {
+        List<Path> iconFiles = List.of(
+                AppPaths.getAppDir().resolve("icons").resolve("app-icon.png"),
+                AppPaths.getAppDir().resolve("app-icon.png"),
+                AppPaths.getAppDir().resolve("icons").resolve("app-icon.ico"),
+                AppPaths.getAppDir().resolve("app-icon.ico")
+        );
+
+        for (Path iconFile : iconFiles) {
+            Image image = loadImageFile(iconFile);
+
+            if (image != null) {
+                System.out.println("Icone da bandeja carregado: " + iconFile.toAbsolutePath());
+                return image;
+            }
+        }
+
+        return null;
+    }
+
+    private static Image loadImageFile(Path iconFile) {
+        if (!Files.exists(iconFile)) {
+            return null;
+        }
+
+        try {
+            if (iconFile.toString().toLowerCase(java.util.Locale.ROOT).endsWith(".png")) {
+                return ImageIO.read(iconFile.toFile());
+            }
+
+            ImageIcon imageIcon = new ImageIcon(iconFile.toString());
+
+            if (imageIcon.getIconWidth() > 0 && imageIcon.getIconHeight() > 0) {
+                return imageIcon.getImage();
+            }
+        } catch (RuntimeException | IOException e) {
+            System.out.println("Nao foi possivel carregar icone " + iconFile.toAbsolutePath()
+                    + ": " + e.getMessage());
+        }
+
+        return null;
+    }
+
+    private static void addTrayIcon(Image image) throws AWTException {
+        PopupMenu popupMenu = new PopupMenu();
+        MenuItem exitItem = new MenuItem("Sair");
+
+        exitItem.addActionListener(event -> exitFromTray());
+        popupMenu.add(exitItem);
+
+        trayIcon = new TrayIcon(image, "S4E Camera Performance Tuning", popupMenu);
+        trayIcon.setImageAutoSize(true);
+
+        SystemTray.getSystemTray().add(trayIcon);
+    }
+
+    private static void exitFromTray() {
+        Thread exitThread = new Thread(() -> {
+            System.out.println();
+            System.out.println("Encerramento solicitado pela bandeja do sistema.");
+            System.out.println("Finalizando aplicacao...");
+            System.out.flush();
+
+            Thread forcedExitThread = new Thread(() -> {
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+                System.out.println("Forcando encerramento da aplicacao.");
+                System.out.flush();
+                Runtime.getRuntime().halt(0);
+            }, "tray-forced-exit");
+
+            forcedExitThread.setDaemon(true);
+            forcedExitThread.start();
+
+            System.exit(0);
+        }, "tray-exit");
+
+        exitThread.setDaemon(false);
+        exitThread.start();
+    }
+
+    private static void removeTrayIcon() {
+        if (trayIcon == null || !SystemTray.isSupported()) {
+            return;
+        }
+
+        SystemTray.getSystemTray().remove(trayIcon);
+        trayIcon = null;
     }
 
     private static List<StreamDiscoveryResult> discoverAllCameras(
@@ -194,6 +346,56 @@ public class AppPerformanceTuningV2 {
             return cameras;
         }
 
+        addNamedCameraProperties(localConfig, cameras);
+        addIndexedCameraProperties(localConfig, cameras);
+
+        if (cameras.isEmpty()) {
+            System.out.println("Nenhuma URL RTSP configurada.");
+            System.out.println("Informe S4E_CAMERA_CONFIG_FILE, S4E_TEST_RTSP_URL ou -Ds4e.test.rtspUrl.");
+        }
+
+        return cameras;
+    }
+
+    private static void addNamedCameraProperties(Properties localConfig, List<CameraConfig> cameras) {
+        if (localConfig == null) {
+            return;
+        }
+
+        localConfig.stringPropertyNames().stream()
+                .filter(AppPerformanceTuningV2::isNamedCameraProperty)
+                .sorted(Comparator.naturalOrder())
+                .forEach(propertyName -> {
+                    String cameraCode = propertyName.substring("camera.".length());
+                    String rtspUrl = localConfig.getProperty(propertyName);
+
+                    if (isBlank(rtspUrl)) {
+                        System.out.println("Camera " + cameraCode + " ignorada: rtspUrl nao informado.");
+                        return;
+                    }
+
+                    cameras.add(new CameraConfig(cameraCode, rtspUrl));
+                });
+    }
+
+    private static boolean isNamedCameraProperty(String propertyName) {
+        if (isBlank(propertyName) || !propertyName.startsWith("camera.")) {
+            return false;
+        }
+
+        String suffix = propertyName.substring("camera.".length());
+
+        return !suffix.isBlank()
+                && !"code".equals(suffix)
+                && !"rtspUrl".equals(suffix)
+                && !suffix.matches("\\d+\\.(code|rtspUrl)");
+    }
+
+    private static void addIndexedCameraProperties(Properties localConfig, List<CameraConfig> cameras) {
+        if (localConfig == null) {
+            return;
+        }
+
         int cameraIndex = 1;
 
         while (true) {
@@ -217,13 +419,6 @@ public class AppPerformanceTuningV2 {
             cameras.add(new CameraConfig(cameraCode, rtspUrl));
             cameraIndex++;
         }
-
-        if (cameras.isEmpty()) {
-            System.out.println("Nenhuma URL RTSP configurada.");
-            System.out.println("Informe S4E_CAMERA_CONFIG_FILE, S4E_TEST_RTSP_URL ou -Ds4e.test.rtspUrl.");
-        }
-
-        return cameras;
     }
 
     private static Properties loadLocalConfig() {
@@ -233,7 +428,9 @@ public class AppPerformanceTuningV2 {
                 "S4E_CAMERA_CONFIG_FILE",
                 null
         );
-        Path configPath = isBlank(configuredPath) ? DEFAULT_LOCAL_CONFIG_FILE : Paths.get(configuredPath);
+        Path configPath = isBlank(configuredPath)
+                ? AppPaths.getConfigFile(DEFAULT_LOCAL_CONFIG_FILE.getFileName().toString())
+                : resolveConfiguredPath(configuredPath);
         Properties properties = new Properties();
 
         if (!Files.exists(configPath)) {
@@ -250,6 +447,16 @@ public class AppPerformanceTuningV2 {
         }
 
         return properties;
+    }
+
+    private static Path resolveConfiguredPath(String configuredPath) {
+        Path path = Paths.get(configuredPath);
+
+        if (path.isAbsolute()) {
+            return path;
+        }
+
+        return AppPaths.getAppDir().resolve(path).normalize();
     }
 
     private static String getConfigValue(
@@ -351,7 +558,7 @@ public class AppPerformanceTuningV2 {
         return summaries;
     }
 
-    private static void runLocalLlmAnalysis(
+    private static Optional<String> runLocalLlmAnalysis(
             LocalLlmAnalysisService llmAnalysisService,
             CameraConfig camera,
             List<PipelineTestSummary> completeResults,
@@ -359,7 +566,7 @@ public class AppPerformanceTuningV2 {
             RecommendationSelector recommendationSelector) {
 
         if (!llmAnalysisService.isEnabled()) {
-            return;
+            return Optional.empty();
         }
 
         System.out.println();
@@ -377,7 +584,7 @@ public class AppPerformanceTuningV2 {
 
         if (analysis.isEmpty()) {
             System.out.println("LLM local nao retornou analise.");
-            return;
+            return Optional.empty();
         }
 
         System.out.println();
@@ -387,5 +594,7 @@ public class AppPerformanceTuningV2 {
 
         System.out.println();
         System.out.println("Relatorio LLM: " + llmReportFile.toAbsolutePath());
+
+        return analysis;
     }
 }

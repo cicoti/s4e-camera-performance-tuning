@@ -23,11 +23,24 @@ Exemplo:
 ```properties
 tuning.repetitions=3
 
+llm.enabled=false
+llm.endpoint=http://localhost:11434/api/generate
+llm.model=llama3.1:8b
+llm.timeoutSeconds=300
+llm.maxTokens=500
+
 camera.1.code=CAM01_INTELBRAS
 camera.1.rtspUrl=rtsp://usuario:senha@192.168.15.21:554/cam/realmonitor?channel=1&subtype=0
 
 camera.2.code=CAM02_INTELBRAS
 camera.2.rtspUrl=rtsp://usuario:senha@192.168.15.22:554/cam/realmonitor?channel=1&subtype=0
+```
+
+Tambem e possivel usar o formato curto:
+
+```properties
+camera.CAM01_INTELBRAS=rtsp://usuario:senha@192.168.15.21:554/cam/realmonitor?channel=1&subtype=0
+camera.CAM02_STONKAM=rtsp://usuario:senha@192.168.15.88:554/cam1/mainstream
 ```
 
 Tambem e possivel sobrescrever por variavel de ambiente:
@@ -69,7 +82,16 @@ ou:
 3. Executa benchmark tecnico com `fakesink`, com repeticoes por configuracao.
 4. Consolida score medio, score minimo, pior intervalo, picos, erros e watchdog.
 5. Escolhe recomendacao por regra deterministica priorizando estabilidade.
-6. Gera relatorio CSV em `logs/`.
+6. Classifica cada resultado como `RECOMENDADA`, `RESSALVA` ou `REPROVADA`.
+7. Gera relatorio CSV tecnico em `logs/<camera>/`.
+8. Opcionalmente chama LLM local via Ollama para explicar a decisao ja tomada pelo algoritmo.
+9. Gera relatorio TXT por camera em `logs/<camera>/` com a recomendacao do programa e a analise da LLM, quando disponivel.
+
+## Criterios de status
+
+- `RECOMENDADA`: score medio >= 90, score minimo >= 85, sem picos acima de 120 ms, sem picos acima de 200 ms, sem erro e sem watchdog.
+- `RESSALVA`: tem picos acima de 120 ms, mas nao tem picos acima de 200 ms, erro, watchdog ou score abaixo do minimo.
+- `REPROVADA`: tem picos acima de 200 ms, erro, watchdog, score medio < 90 ou score minimo < 85.
 
 O preview visual existe no codigo, mas esta desabilitado no fluxo principal.
 
