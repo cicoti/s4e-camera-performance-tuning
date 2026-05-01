@@ -26,6 +26,7 @@ tuning.repetitions=3
 llm.enabled=false
 llm.endpoint=http://localhost:11434/api/generate
 llm.model=llama3.1:8b
+llm.autoPullModel=false
 llm.timeoutSeconds=300
 llm.maxTokens=500
 
@@ -34,6 +35,13 @@ camera.1.rtspUrl=rtsp://usuario:senha@192.168.15.21:554/cam/realmonitor?channel=
 
 camera.2.code=CAM02_INTELBRAS
 camera.2.rtspUrl=rtsp://usuario:senha@192.168.15.22:554/cam/realmonitor?channel=1&subtype=0
+```
+
+Quando `llm.enabled=true`, a aplicacao valida no inicio se o modelo existe no
+Ollama local. Para baixar automaticamente o modelo ausente, habilite:
+
+```properties
+llm.autoPullModel=true
 ```
 
 Tambem e possivel usar o formato curto:
@@ -77,15 +85,16 @@ ou:
 
 ## Fluxo atual
 
-1. Descobre codec e disponibilidade TCP/UDP.
-2. Gera candidatos de tuning combinando protocolo, decoder, latency e buffer.
-3. Executa benchmark tecnico com `fakesink`, com repeticoes por configuracao.
-4. Consolida score medio, score minimo, pior intervalo, picos, erros e watchdog.
-5. Escolhe recomendacao por regra deterministica priorizando estabilidade.
-6. Classifica cada resultado como `RECOMENDADA`, `RESSALVA` ou `REPROVADA`.
-7. Gera relatorio CSV tecnico em `logs/<camera>/`.
-8. Opcionalmente chama LLM local via Ollama para explicar a decisao ja tomada pelo algoritmo.
-9. Gera relatorio TXT por camera em `logs/<camera>/` com a recomendacao do programa e a analise da LLM, quando disponivel.
+1. Executa pre-check do GStreamer e da LLM local, quando habilitada.
+2. Descobre codec e disponibilidade TCP/UDP.
+3. Gera candidatos de tuning combinando protocolo, decoder, latency e buffer.
+4. Executa benchmark tecnico com `fakesink`, com repeticoes por configuracao.
+5. Consolida score medio, score minimo, pior intervalo, picos, erros e watchdog.
+6. Escolhe recomendacao por regra deterministica priorizando estabilidade.
+7. Classifica cada resultado como `RECOMENDADA`, `RESSALVA` ou `REPROVADA`.
+8. Gera relatorio CSV tecnico em `logs/<camera>/`.
+9. Opcionalmente chama LLM local via Ollama para explicar a decisao ja tomada pelo algoritmo.
+10. Gera relatorio TXT por camera em `logs/<camera>/` com a recomendacao do programa e a analise da LLM, quando disponivel.
 
 ## Criterios de status
 

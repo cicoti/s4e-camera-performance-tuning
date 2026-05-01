@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,6 +26,8 @@ import com.s4etech.performance.v2.tuning.RecommendationSelector;
 public class LocalLlmAnalysisService {
 
     private static final int RANKING_LIMIT = 5;
+    private static final int OLLAMA_RETRY_LIMIT = 12;
+    private static final long OLLAMA_RETRY_DELAY_MILLIS = 10_000;
     private static final DateTimeFormatter FILE_TIMESTAMP_FORMATTER =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final DateTimeFormatter REPORT_TIMESTAMP_FORMATTER =
@@ -32,6 +35,8 @@ public class LocalLlmAnalysisService {
 
     private final LocalLlmConfig config;
     private final HttpClient httpClient;
+    private boolean available = true;
+    private String unavailableReason;
 
     public LocalLlmAnalysisService(LocalLlmConfig config) {
         this.config = config;
@@ -41,7 +46,59 @@ public class LocalLlmAnalysisService {
     }
 
     public boolean isEnabled() {
-        return config.isEnabled();
+        return config.isEnabled() && available;
+    }
+
+    public void prepare() {
+        if (!config.isEnabled()) {
+            return;
+        }
+
+        System.out.println();
+        System.out.println("====================================================");
+        System.out.println("PRE-CHECK DA LLM LOCAL");
+        System.out.println("====================================================");
+        System.out.println("Endpoint: " + config.getEndpoint());
+        System.out.println("Modelo: " + config.getModel());
+
+        try {
+            if (isModelInstalled()) {
+                System.out.println("Modelo LLM encontrado localmente.");
+                return;
+            }
+
+            System.out.println("Modelo LLM nao encontrado localmente: " + config.getModel());
+
+            if (!config.isAutoPullModel()) {
+                markUnavailable("Instale com: ollama pull " + config.getModel()
+                        + " ou habilite llm.autoPullModel=true.");
+                System.out.println(unavailableReason);
+                return;
+            }
+
+            System.out.println("Baixando modelo automaticamente. Isso pode demorar na primeira execucao.");
+            pullModel();
+
+            if (isModelInstalled()) {
+                System.out.println("Modelo LLM instalado com sucesso.");
+                return;
+            }
+
+            markUnavailable("Ollama concluiu o pull, mas o modelo ainda nao apareceu em /api/tags: "
+                    + config.getModel());
+            System.out.println(unavailableReason);
+        } catch (IOException e) {
+            markUnavailable("LLM local indisponivel: " + describeException(e)
+                    + ". Verifique se o Ollama esta rodando em " + config.getEndpoint() + ".");
+            System.out.println(unavailableReason);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            markUnavailable("Pre-check da LLM local interrompido.");
+            System.out.println(unavailableReason);
+        } catch (IllegalArgumentException e) {
+            markUnavailable("Configuracao invalida da LLM local: " + e.getMessage());
+            System.out.println(unavailableReason);
+        }
     }
 
     public Optional<String> analyze(
@@ -52,6 +109,10 @@ public class LocalLlmAnalysisService {
 
         if (!config.isEnabled()) {
             return Optional.empty();
+        }
+
+        if (!available) {
+            return Optional.of(unavailableReason);
         }
 
         if (recommendation == null) {
@@ -249,6 +310,103 @@ public class LocalLlmAnalysisService {
                 + "}";
     }
 
+    private boolean isModelInstalled() throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(getOllamaEndpoint("tags"))
+                .timeout(config.getTimeout())
+                .GET()
+                .build();
+
+        HttpResponse<String> response = sendWithOllamaRetry(request, "listar modelos");
+
+        return extractJsonStringValues(response.body(), "name").contains(config.getModel());
+    }
+
+    private void pullModel() throws IOException, InterruptedException {
+        String requestBody = "{"
+                + "\"name\":\"" + escapeJson(config.getModel()) + "\","
+                + "\"stream\":false"
+                + "}";
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(getOllamaEndpoint("pull"))
+                .timeout(config.getTimeout())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                .build();
+
+        sendWithOllamaRetry(request, "baixar o modelo " + config.getModel());
+    }
+
+    private HttpResponse<String> sendWithOllamaRetry(HttpRequest request, String operation)
+            throws IOException, InterruptedException {
+
+        for (int attempt = 1; attempt <= OLLAMA_RETRY_LIMIT; attempt++) {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                return response;
+            }
+
+            if (!isUpgradeInProgress(response)) {
+                throw new IOException("Ollama respondeu HTTP " + response.statusCode()
+                        + " ao " + operation + ": " + abbreviate(response.body()));
+            }
+
+            if (attempt == OLLAMA_RETRY_LIMIT) {
+                throw new IOException("Ollama continua em upgrade apos " + OLLAMA_RETRY_LIMIT
+                        + " tentativas ao " + operation);
+            }
+
+            System.out.println("Ollama esta em upgrade. Tentando novamente em "
+                    + (OLLAMA_RETRY_DELAY_MILLIS / 1000) + "s (tentativa "
+                    + attempt + "/" + OLLAMA_RETRY_LIMIT + ").");
+            Thread.sleep(OLLAMA_RETRY_DELAY_MILLIS);
+        }
+
+        throw new IOException("Ollama indisponivel ao " + operation);
+    }
+
+    private boolean isUpgradeInProgress(HttpResponse<String> response) {
+        return response != null
+                && response.body() != null
+                && response.body().toLowerCase(java.util.Locale.ROOT).contains("upgrade in progress");
+    }
+
+    private String abbreviate(String value) {
+        if (value == null || value.isBlank()) {
+            return "sem corpo de resposta";
+        }
+
+        String normalized = value.replace('\n', ' ').replace('\r', ' ').trim();
+
+        if (normalized.length() <= 160) {
+            return normalized;
+        }
+
+        return normalized.substring(0, 160) + "...";
+    }
+
+    private URI getOllamaEndpoint(String apiName) {
+        URI endpoint = URI.create(config.getEndpoint());
+        String path = endpoint.getPath();
+        String basePath = path == null ? "" : path;
+        int apiIndex = basePath.indexOf("/api/");
+
+        if (apiIndex >= 0) {
+            basePath = basePath.substring(0, apiIndex);
+        }
+
+        String endpointPath = basePath + "/api/" + apiName;
+
+        return URI.create(endpoint.resolve(endpointPath).toString());
+    }
+
+    private void markUnavailable(String reason) {
+        available = false;
+        unavailableReason = reason;
+    }
+
     private String describeException(Exception exception) {
         String message = exception.getMessage();
 
@@ -267,59 +425,83 @@ public class LocalLlmAnalysisService {
     }
 
     private String extractJsonString(String json, String fieldName) {
-        if (json == null || fieldName == null) {
+        List<String> values = extractJsonStringValues(json, fieldName);
+
+        if (values.isEmpty()) {
             return null;
+        }
+
+        return values.get(0);
+    }
+
+    private List<String> extractJsonStringValues(String json, String fieldName) {
+        List<String> values = new ArrayList<>();
+
+        if (json == null || fieldName == null) {
+            return values;
         }
 
         String marker = "\"" + fieldName + "\"";
-        int markerIndex = json.indexOf(marker);
+        int searchIndex = 0;
 
-        if (markerIndex < 0) {
-            return null;
-        }
+        while (searchIndex < json.length()) {
+            int markerIndex = json.indexOf(marker, searchIndex);
 
-        int colonIndex = json.indexOf(':', markerIndex + marker.length());
+            if (markerIndex < 0) {
+                return values;
+            }
 
-        if (colonIndex < 0) {
-            return null;
-        }
+            int colonIndex = json.indexOf(':', markerIndex + marker.length());
 
-        int startQuoteIndex = json.indexOf('"', colonIndex + 1);
+            if (colonIndex < 0) {
+                return values;
+            }
 
-        if (startQuoteIndex < 0) {
-            return null;
-        }
+            int startQuoteIndex = json.indexOf('"', colonIndex + 1);
 
-        StringBuilder value = new StringBuilder();
-        boolean escaping = false;
+            if (startQuoteIndex < 0) {
+                return values;
+            }
 
-        for (int index = startQuoteIndex + 1; index < json.length(); index++) {
-            char current = json.charAt(index);
+            StringBuilder value = new StringBuilder();
+            boolean escaping = false;
+            boolean foundValue = false;
 
-            if (escaping) {
-                appendEscapedCharacter(value, current, json, index);
+            for (int index = startQuoteIndex + 1; index < json.length(); index++) {
+                char current = json.charAt(index);
 
-                if (current == 'u') {
-                    index += 4;
+                if (escaping) {
+                    appendEscapedCharacter(value, current, json, index);
+
+                    if (current == 'u') {
+                        index += 4;
+                    }
+
+                    escaping = false;
+                    continue;
                 }
 
-                escaping = false;
-                continue;
+                if (current == '\\') {
+                    escaping = true;
+                    continue;
+                }
+
+                if (current == '"') {
+                    values.add(value.toString());
+                    searchIndex = index + 1;
+                    foundValue = true;
+                    break;
+                }
+
+                value.append(current);
             }
 
-            if (current == '\\') {
-                escaping = true;
-                continue;
+            if (!foundValue) {
+                return values;
             }
-
-            if (current == '"') {
-                return value.toString();
-            }
-
-            value.append(current);
         }
 
-        return null;
+        return values;
     }
 
     private void appendEscapedCharacter(StringBuilder value, char current, String json, int index) {

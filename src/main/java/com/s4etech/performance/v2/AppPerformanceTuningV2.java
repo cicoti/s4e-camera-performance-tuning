@@ -29,6 +29,7 @@ import com.s4etech.performance.v2.model.PipelineTestConfig;
 import com.s4etech.performance.v2.model.PipelineTestMetrics;
 import com.s4etech.performance.v2.model.PipelineTestSummary;
 import com.s4etech.performance.v2.model.StreamDiscoveryResult;
+import com.s4etech.performance.v2.precheck.GStreamerPrecheckService;
 import com.s4etech.performance.v2.report.TuningReportService;
 import com.s4etech.performance.v2.tuning.CandidateConfigGenerator;
 import com.s4etech.performance.v2.tuning.RecommendationSelector;
@@ -42,7 +43,10 @@ public class AppPerformanceTuningV2 {
     private static TrayIcon trayIcon;
 
     public static void main(String[] args) {
-        Gst.init("AppPerformanceTuningV2", args);
+        if (!initializeGStreamer(args)) {
+            return;
+        }
+
         installTrayIcon();
 
         try {
@@ -56,6 +60,14 @@ public class AppPerformanceTuningV2 {
             RecommendationSelector recommendationSelector = new RecommendationSelector();
             TuningReportService reportService = new TuningReportService();
             LocalLlmAnalysisService llmAnalysisService = new LocalLlmAnalysisService(LocalLlmConfig.from(localConfig));
+            llmAnalysisService.prepare();
+
+            if (!new GStreamerPrecheckService().run()) {
+                System.out.println();
+                System.out.println("Tuning abortado: GStreamer nao passou no pre-check.");
+                return;
+            }
+
             int repetitionsPerConfig = getIntConfigValue(
                     localConfig,
                     "s4e.tuning.repetitions",
@@ -127,6 +139,22 @@ public class AppPerformanceTuningV2 {
             removeTrayIcon();
             Gst.deinit();
             System.out.println("Aplicacao encerrada.");
+        }
+    }
+
+    private static boolean initializeGStreamer(String[] args) {
+        try {
+            Gst.init("AppPerformanceTuningV2", args);
+            return true;
+        } catch (RuntimeException | UnsatisfiedLinkError e) {
+            System.out.println();
+            System.out.println("====================================================");
+            System.out.println("PRE-CHECK DO GSTREAMER");
+            System.out.println("====================================================");
+            System.out.println("Nao foi possivel inicializar o GStreamer.");
+            System.out.println("Erro: " + e.getMessage());
+            System.out.println("Verifique se o GStreamer esta instalado e disponivel no PATH.");
+            return false;
         }
     }
 

@@ -11,13 +11,22 @@ public class LocalLlmConfig {
     private static final int DEFAULT_MAX_TOKENS = 500;
 
     private final boolean enabled;
+    private final boolean autoPullModel;
     private final String endpoint;
     private final String model;
     private final Duration timeout;
     private final int maxTokens;
 
-    private LocalLlmConfig(boolean enabled, String endpoint, String model, Duration timeout, int maxTokens) {
+    private LocalLlmConfig(
+            boolean enabled,
+            boolean autoPullModel,
+            String endpoint,
+            String model,
+            Duration timeout,
+            int maxTokens) {
+
         this.enabled = enabled;
+        this.autoPullModel = autoPullModel;
         this.endpoint = endpoint;
         this.model = model;
         this.timeout = timeout;
@@ -30,6 +39,14 @@ public class LocalLlmConfig {
                 "s4e.llm.enabled",
                 "S4E_LLM_ENABLED",
                 "llm.enabled",
+                "false"
+        ));
+
+        boolean autoPullModel = Boolean.parseBoolean(getValue(
+                properties,
+                "s4e.llm.autoPullModel",
+                "S4E_LLM_AUTO_PULL_MODEL",
+                "llm.autoPullModel",
                 "false"
         ));
 
@@ -67,6 +84,7 @@ public class LocalLlmConfig {
 
         return new LocalLlmConfig(
                 enabled,
+                autoPullModel,
                 endpoint,
                 model,
                 Duration.ofSeconds(timeoutSeconds),
@@ -76,6 +94,10 @@ public class LocalLlmConfig {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isAutoPullModel() {
+        return autoPullModel;
     }
 
     public String getEndpoint() {
