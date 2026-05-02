@@ -60,7 +60,11 @@ public class AppPerformanceTuningV2 {
             RecommendationSelector recommendationSelector = new RecommendationSelector();
             TuningReportService reportService = new TuningReportService();
             LocalLlmAnalysisService llmAnalysisService = new LocalLlmAnalysisService(LocalLlmConfig.from(localConfig));
-            llmAnalysisService.prepare();
+            if (!llmAnalysisService.prepare()) {
+                System.out.println();
+                System.out.println("Tuning abortado: LLM local nao passou no pre-check.");
+                return;
+            }
 
             if (!new GStreamerPrecheckService().run()) {
                 System.out.println();

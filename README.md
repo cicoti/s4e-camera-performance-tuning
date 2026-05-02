@@ -83,6 +83,68 @@ ou:
 -Ds4e.camera.configFile=C:\caminho\para\tunning.properties
 ```
 
+## Procedimento de teste de redes
+
+O objetivo deste procedimento e comparar a estabilidade de transmissao RTSP em
+diferentes tipos de rede usando sempre o mesmo criterio de medicao. O tecnico
+deve executar o programa uma vez para cada rede avaliada:
+
+- Rede local cabeada.
+- Rede Wi-Fi.
+- Rede mesh.
+- Rede via radio.
+- Rede via satelite.
+
+Em cada rede, o teste deve usar duas fontes de video:
+
+- Uma camera IP com URL RTSP direta.
+- Uma camera conectada a DVR/NVR, usando a URL RTSP do canal correspondente.
+
+Antes de iniciar cada execucao, conecte o computador somente na rede que sera
+testada e confirme que as duas cameras estao acessiveis por essa rede. As URLs
+RTSP devem estar configuradas no arquivo `tunning.properties`.
+
+Exemplo:
+
+```properties
+tuning.repetitions=3
+
+camera.1.code=CAM01_IP
+camera.1.rtspUrl=rtsp://usuario:senha@ip-da-camera:554/stream
+
+camera.2.code=CAM02_DVR
+camera.2.rtspUrl=rtsp://usuario:senha@ip-do-dvr:554/caminho-do-canal
+```
+
+Para cada tipo de rede, o tecnico deve:
+
+1. Ajustar o `tunning.properties` com a camera IP e a camera DVR/NVR.
+2. Executar o programa.
+3. Aguardar o pre-check do GStreamer, da LLM local quando habilitada, e das cameras.
+4. Permitir que o programa conclua todos os testes de tuning.
+5. Separar os relatorios gerados em `logs/<camera>/` identificando qual rede foi testada.
+6. Registrar qualquer indisponibilidade, timeout, erro de pipeline ou watchdog.
+
+O teste so deve ser considerado valido quando as duas cameras responderem no
+pre-check e o tuning terminar completamente. Se alguma camera falhar, corrija
+credenciais, URL RTSP, rota, sinal, cabeamento ou disponibilidade da rede antes
+de repetir a execucao.
+
+Na comparacao entre redes, priorize:
+
+- FPS medio e FPS minimo.
+- Picos acima de 80 ms, 120 ms e 200 ms.
+- Erros de pipeline.
+- Ocorrencias de watchdog.
+- Score medio e score minimo.
+- Status `RECOMENDADA`, `RESSALVA` ou `REPROVADA`.
+- Configuracao recomendada pelo programa.
+
+A melhor rede e a que apresentar maior estabilidade nas duas cameras, menor
+quantidade de picos de latencia, ausencia de erros, ausencia de watchdog e melhor
+score consolidado. A decisao deve priorizar estabilidade da transmissao, nao
+apenas o maior FPS medio.
+
 ## Fluxo atual
 
 1. Executa pre-check do GStreamer e da LLM local, quando habilitada.

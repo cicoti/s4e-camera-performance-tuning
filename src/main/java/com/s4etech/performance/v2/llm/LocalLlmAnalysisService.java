@@ -49,9 +49,9 @@ public class LocalLlmAnalysisService {
         return config.isEnabled() && available;
     }
 
-    public void prepare() {
+    public boolean prepare() {
         if (!config.isEnabled()) {
-            return;
+            return true;
         }
 
         System.out.println();
@@ -64,7 +64,7 @@ public class LocalLlmAnalysisService {
         try {
             if (isModelInstalled()) {
                 System.out.println("Modelo LLM encontrado localmente.");
-                return;
+                return true;
             }
 
             System.out.println("Modelo LLM nao encontrado localmente: " + config.getModel());
@@ -73,7 +73,7 @@ public class LocalLlmAnalysisService {
                 markUnavailable("Instale com: ollama pull " + config.getModel()
                         + " ou habilite llm.autoPullModel=true.");
                 System.out.println(unavailableReason);
-                return;
+                return false;
             }
 
             System.out.println("Baixando modelo automaticamente. Isso pode demorar na primeira execucao.");
@@ -81,23 +81,27 @@ public class LocalLlmAnalysisService {
 
             if (isModelInstalled()) {
                 System.out.println("Modelo LLM instalado com sucesso.");
-                return;
+                return true;
             }
 
             markUnavailable("Ollama concluiu o pull, mas o modelo ainda nao apareceu em /api/tags: "
                     + config.getModel());
             System.out.println(unavailableReason);
+            return false;
         } catch (IOException e) {
             markUnavailable("LLM local indisponivel: " + describeException(e)
                     + ". Verifique se o Ollama esta rodando em " + config.getEndpoint() + ".");
             System.out.println(unavailableReason);
+            return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             markUnavailable("Pre-check da LLM local interrompido.");
             System.out.println(unavailableReason);
+            return false;
         } catch (IllegalArgumentException e) {
             markUnavailable("Configuracao invalida da LLM local: " + e.getMessage());
             System.out.println(unavailableReason);
+            return false;
         }
     }
 
@@ -202,7 +206,11 @@ public class LocalLlmAnalysisService {
         prompt.append("Voce e um assistente tecnico de performance de cameras RTSP.\n");
         prompt.append("Importante: voce NAO decide a configuracao final. A decisao ja foi feita por algoritmo deterministico.\n");
         prompt.append("Sua tarefa e explicar a escolha, apontar riscos e sugerir proximos testes objetivos.\n");
-        prompt.append("Responda em portugues do Brasil, em no maximo 12 linhas, sem inventar dados.\n\n");
+        prompt.append("Responda em portugues do Brasil, em no maximo 12 linhas, sem inventar dados.\n");
+        prompt.append("Nao cite riscos genericos: risco ou ressalva so pode existir se houver picos120, picos200, erro, watchdog, score baixo ou diferenca objetiva nos resultados.\n");
+        prompt.append("Se a recomendacao tiver picos120=0, picos200=0, erros=0, watchdog=0, scoreMedio>=90 e scoreMinimo>=85, diga que nao houve ressalva nos dados coletados.\n");
+        prompt.append("Nao sugira testar valores de latency/buffer que ja aparecem no ranking informado, a menos que a sugestao seja aumentar repeticoes ou testar em outra rede/cenario.\n");
+        prompt.append("Nao use introducoes como 'Aqui esta a resposta'.\n\n");
 
         prompt.append("Camera: ").append(camera != null ? camera.getCode() : "camera").append('\n');
         prompt.append("URL mascarada: ").append(camera != null ? camera.getMaskedRtspUrl() : "").append("\n\n");
@@ -229,8 +237,8 @@ public class LocalLlmAnalysisService {
         prompt.append("Formato da resposta:\n");
         prompt.append("1. Resumo da recomendacao.\n");
         prompt.append("2. Por que ela venceu.\n");
-        prompt.append("3. Riscos ou ressalvas.\n");
-        prompt.append("4. Proximos testes sugeridos.\n");
+        prompt.append("3. Riscos ou ressalvas com base apenas nos dados.\n");
+        prompt.append("4. Proximos testes sugeridos sem repetir combinacoes ja testadas.\n");
 
         return prompt.toString();
     }
